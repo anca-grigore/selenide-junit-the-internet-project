@@ -1,0 +1,53 @@
+### Intellij IDEA ###
+.idea
+logs
+*.iml
+.flattened-pom.xml
+target
+build
+out/
+.idea_modules/
+*.ipr
+*.iws
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+nbactions.xml
+nb-configuration.xml
+
+### VS Code ###
+.vscode/
+.code-workspace
+
+### Eclipse ###
+.settings/
+bin/
+tmp/
+.metadata
+.classpath
+.project
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.factorypath
+
+### STS ###
+.apt_generated
+.settings
+.springBeans
+.sts4-cache
+
+### macOS ###
+**/.DS_Store
