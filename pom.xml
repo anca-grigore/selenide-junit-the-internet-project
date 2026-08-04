@@ -16,7 +16,10 @@
         <junit.version>6.1.0-RC1</junit.version>
         <maven.surefire.version>3.5.3</maven.surefire.version>
         <rest-assured.version>6.0.0</rest-assured.version>
-             <allure.version>2.35.3</allure.version>
+        <allure.version>2.35.3</allure.version>
+        <maven.compiler.version>3.15.0</maven.compiler.version>
+        <aspectj.version>1.9.25.1</aspectj.version>
+        <env></env>
     </properties>
 
     <dependencyManagement>
@@ -55,21 +58,21 @@
             <artifactId>rest-assured</artifactId>
             <version>${rest-assured.version}</version>
         </dependency>
-             <dependency>
-      <groupId>io.qameta.allure</groupId>
-      <artifactId>allure-jupiter</artifactId>
-      <version>${allure.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>io.qameta.allure</groupId>
-      <artifactId>allure-selenide</artifactId>
-      <version>${allure.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>io.qameta.allure</groupId>
-      <artifactId>allure-rest-assured</artifactId>
-      <version>${allure.version}</version>
-    </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-jupiter</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-selenide</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-rest-assured</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -94,7 +97,6 @@
           <release>22</release>
           <source>22</source>
           <target>22</target>
-          <compilerArgs>--enable-preview</compilerArgs>
         </configuration>
       </plugin>
       <!-- Surefire -->
@@ -121,8 +123,8 @@
         </configuration>
         <dependencies>
           <dependency>
-            <groupId>org.aspectj</groupId>
-            <artifactId>aspectjweaver</artifactId>
+              <groupId>org.aspectj</groupId>
+              <artifactId>aspectjweaver</artifactId>
             <version>${aspectj.version}</version>
           </dependency>
         </dependencies>
@@ -141,38 +143,39 @@
       </plugin>
         </plugins>
     </build>
-         <profiles>
-                  <profile>
-      <id>uat</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-      </activation>
-      <properties>
-        <env>uat</env>
-      </properties>
-    </profile>   
-         <profile>
-      <id>production</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-      </activation>
-      <properties>
-        <env>production</env>
-      </properties>
-    </profile>   
-    <profile>
-      <id>chrome-desktop</id>
-      <properties>
-        <selenide.browser>chrome</selenide.browser>
-        <selenide.browserSize>1920x1080</selenide.browserSize>
-        <selenide.startMaximized>true</selenide.startMaximized>
-        <selenide.timeout>15000</selenide.timeout>
-      </properties>
-    </profile>
-    <profile>
-      <id>headless</id>
-      <properties>
-        <selenide.headless>true</selenide.headless>
-      </properties>
-    </profile>
+    <profiles>
+        <profile>
+            <id>uat</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <env>uat</env>
+            </properties>
+        </profile>
+        <profile>
+            <id>production</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <properties>
+                <env>production</env>
+            </properties>
+        </profile>
+        <profile>
+            <id>chrome-desktop</id>
+            <properties>
+                <selenide.browser>chrome</selenide.browser>
+                <selenide.browserSize>1920x1080</selenide.browserSize>
+                <selenide.startMaximized>true</selenide.startMaximized>
+                <selenide.timeout>15000</selenide.timeout>
+            </properties>
+        </profile>
+        <profile>
+            <id>headless</id>
+            <properties>
+                <selenide.headless>true</selenide.headless>
+            </properties>
+        </profile>
+    </profiles>
 </project>
