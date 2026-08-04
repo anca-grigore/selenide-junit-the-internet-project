@@ -1,0 +1,261 @@
+name: Production Test Run
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run tests on (leave empty to use workflow branch)'
+        required: false
+        default: ''
+
+      runType:
+        description: 'Run tests by tag or test class'
+        required: true
+        type: choice
+        options: ['tag', 'testClass']
+        default: 'tag'
+
+      testValue:
+        description: 'Tag name OR test class name/pattern'
+        required: false
+        default: ''
+
+      appendMavenArgs:
+        description: 'Optional Maven args'
+        required: false
+        default: ''
+
+concurrency:
+  group: single-runner
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on:
+      labels: ubuntu-latest
+    environment: production
+    outputs:
+      timestamp: ${{ steps.set-timestamp.outputs.timestamp }}
+      tests_produced_artifacts: ${{ steps.set-status.outputs.tests_produced_artifacts }}
+
+    env:
+      JAVA_VERSION: ${{ vars.JAVA_VERSION }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
+      BASIC_AUTH_USER: ${{ secrets.BASIC_AUTH_USER }}
+      BASIC_AUTH_PASS: ${{ secrets.BASIC_AUTH_PASS }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 22
+        uses: actions/setup-java@v5.7.0
+        with:
+          java-version: ${{ vars.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+      - name: Build with Maven
+        run: mvn -B package -DskipTests --file pom.xml
+
+      - name: Build Maven Command
+        id: build-command
+        run: |
+          MAVEN_CMD="mvn clean test -Pproduction,${EXECUTION_MODE},headless,chrome-desktop"
+                    
+          # Run by tag or test class
+          if [ "${{ github.event.inputs.runType }}" = "tag" ] && [ -n "${{ github.event.inputs.testValue }}" ]; then
+            MAVEN_CMD="$MAVEN_CMD -Dgroups=${{ github.event.inputs.testValue }}"
+          fi
+          
+          if [ "${{ github.event.inputs.runType }}" = "testClass" ] && [ -n "${{ github.event.inputs.testValue }}" ]; then
+            MAVEN_CMD="$MAVEN_CMD -Dtest=${{ github.event.inputs.testValue }}"
+          fi
+          
+          if [ -n "${{ github.event.inputs.appendMavenArgs }}" ]; then
+            MAVEN_CMD="$MAVEN_CMD ${{ github.event.inputs.appendMavenArgs }}"
+          fi
+          
+          echo "Final Maven command:"
+          echo "$MAVEN_CMD"
+          echo "command=$MAVEN_CMD" >> $GITHUB_OUTPUT
+
+      - name: Run Automated Tests
+        run: ${{ steps.build-command.outputs.command }}
+        continue-on-error: true
+
+      - name: Generate Allure Report
+        if: always()
+        run: mvn allure:report
+
+      - name: Set Timestamp
+        if: always()
+        id: set-timestamp
+        run: |
+          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+          mkdir -p "$TIMESTAMP"
+          [ -d build/allure-results ] && mv build/allure-results "$TIMESTAMP/"
+          [ -d build/allure-report ] && mv build/allure-report "$TIMESTAMP/"
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
+
+      - name: Upload Allure Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: allure-artifacts-${{ env.TIMESTAMP }}
+          path: ${{ env.TIMESTAMP }}
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload Allure report to S3
+        run: |
+          ENV=production
+          FOLDER_NAME="${{ env.TIMESTAMP }}_${{ GITHUB.RUN_NUMBER }}-${{ GITHUB.RUN_ATTEMPT}}"
+          BUCKET_NAME=${{ vars.AWS_BUCKET_NAME }}
+          aws s3 sync ${{ env.TIMESTAMP }}/allure-report s3://$BUCKET_NAME/reports/$ENV/$FOLDER_NAME/ --delete
+
+      - name: Cleanup old reports (>60 days)
+        run: |
+          ENV=production
+          BUCKET_NAME=${{ vars.AWS_BUCKET_NAME }}
+          echo "Cleaning up old reports..."
+          aws s3 ls s3://$BUCKET_NAME/reports/$ENV/ --recursive | while read -r line; do
+            createDate=$(echo $line | awk '{print $1" "$2}')
+            createDate=$(date -d "$createDate" +%s)
+            olderThan=$(date -d "-60 days" +%s)
+            if [[ $createDate -lt $olderThan ]]; then
+              fileName=$(echo $line | awk '{print $4}')
+              if [[ $fileName == reports/$ENV/* ]]; then
+                echo "Deleting s3://$BUCKET_NAME/$fileName"
+                aws s3 rm "s3://$BUCKET_NAME/$fileName"
+              fi
+            fi
+          done
+
+      - name: Rebuild index pages
+        run: |
+          ENV=production
+          BUCKET_NAME=${{ vars.AWS_BUCKET_NAME }}
+
+          case "$ENV" in
+            stage)      _CLR="#1976D2"; _LBL="Stage"      ;;
+            uat)        _CLR="#F57C00"; _LBL="UAT"        ;;
+            production) _CLR="#2E7D32"; _LBL="Production" ;;
+            *)          _CLR="#455A64"; _LBL="$ENV"        ;;
+          esac
+
+          _mon() {
+            case "$1" in
+              01) echo Jan ;; 02) echo Feb ;; 03) echo Mar ;;
+              04) echo Apr ;; 05) echo May ;; 06) echo Jun ;;
+              07) echo Jul ;; 08) echo Aug ;; 09) echo Sep ;;
+              10) echo Oct ;; 11) echo Nov ;; 12) echo Dec ;;
+            esac
+          }
+
+          FOLDERS=$(aws s3 ls "s3://${BUCKET_NAME}/reports/${ENV}/" \
+            | awk '{print $NF}' \
+            | sed 's|/$||' \
+            | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]+-[0-9]+$' \
+            | sort -r)
+
+          TABLE_ROWS=""
+          while IFS= read -r F; do
+            [[ -z "$F" ]] && continue
+            YR="${F:0:4}"; MO="${F:5:2}"; DY="${F:8:2}"
+            HH="${F:11:2}"; MI="${F:14:2}"
+            RP="${F##*_}"; RN="${RP%%-*}"; RA="${RP##*-}"
+            MON=$(_mon "$MO")
+            ATT=""
+            (( RA > 1 )) && ATT=" <span class='att'>attempt ${RA}</span>"
+            TABLE_ROWS+="<tr><td>${MON} ${DY#0}, ${YR}</td><td>${HH}:${MI} UTC</td><td>Run #${RN}${ATT}</td><td><a class='btn' href='/reports/${ENV}/${F}/index.html'>View Report</a></td></tr>"
+          done <<< "$FOLDERS"
+
+          [[ -z "$TABLE_ROWS" ]] && TABLE_ROWS="<tr><td colspan='4' class='empty'>No reports found.</td></tr>"
+
+          GEN_DATE=$(date -u '+%B %-d, %Y at %H:%M UTC')
+          ENV_HTML=$(mktemp --suffix=.html)
+          cat > "$ENV_HTML" <<HTML
+          <!DOCTYPE html><html lang="en"><head>
+          <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Test Reports - ${_LBL}</title>
+          <style>
+          *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+          body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F4F6F9;color:#1C2536;min-height:100vh}
+          .hdr{background:${_CLR};color:#fff;padding:28px 0;box-shadow:0 2px 12px rgba(0,0,0,.22)}
+          .hdr-inner{max-width:920px;margin:0 auto;padding:0 24px}
+          .env-pill{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.45);border-radius:99px;padding:3px 14px;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px}
+          .hdr h1{font-size:clamp(1.4rem,4vw,2rem);font-weight:700;line-height:1.2}
+          .hdr p{margin-top:8px;opacity:.85;font-size:.94rem}
+          .hdr a{color:rgba(255,255,255,.8);font-size:.85rem;text-decoration:none;margin-top:12px;display:inline-block}
+          .hdr a:hover{color:#fff}
+          .main{max-width:920px;margin:36px auto 64px;padding:0 24px}
+          .card{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07),0 6px 24px rgba(0,0,0,.08)}
+          table{width:100%;border-collapse:collapse}
+          thead th{background:#EBEEF3;color:#6B7280;font-size:.71rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:13px 22px;text-align:left;border-bottom:1px solid #DDE2EA}
+          tbody tr{border-bottom:1px solid #F0F2F6;transition:background .1s}
+          tbody tr:last-child{border-bottom:none}
+          tbody tr:hover{background:#F8FAFC}
+          td{padding:15px 22px;vertical-align:middle;font-size:.92rem}
+          td:first-child{font-weight:600;white-space:nowrap}
+          td:nth-child(2){color:#6B7280;font-size:.88rem;white-space:nowrap}
+          .att{display:inline-block;background:#FFF3E0;color:#C2410C;border-radius:4px;padding:1px 7px;font-size:.74rem;font-weight:700;margin-left:4px}
+          .empty{text-align:center;color:#9CA3AF;padding:52px 20px;font-style:italic}
+          .btn{display:inline-block;background:${_CLR};color:#fff !important;padding:7px 18px;border-radius:7px;text-decoration:none;font-size:.83rem;font-weight:600;transition:filter .15s;white-space:nowrap}
+          .btn:hover{filter:brightness(.88)}
+          .footer{text-align:center;color:#9CA3AF;font-size:.79rem;margin-top:30px}
+          @media(max-width:580px){thead th:nth-child(2),td:nth-child(2){display:none}td{padding:13px 14px}}
+          </style></head><body>
+          <div class="hdr"><div class="hdr-inner">
+          <div class="env-pill">${_LBL}</div>
+          <h1>Allure Test Reports</h1>
+          <p>Automated test execution history &mdash; <strong>${_LBL}</strong> environment</p>
+          <a href="/">&#8592; All environments</a>
+          </div></div>
+          <div class="main"><div class="card">
+          <table><thead><tr><th>Date</th><th>Time (UTC)</th><th>Run</th><th>Report</th></tr></thead>
+          <tbody>${TABLE_ROWS}</tbody></table>
+          </div>
+          <div class="footer">Generated ${GEN_DATE} &nbsp;&bull;&nbsp; ${_LBL} environment</div>
+          </div></body></html>
+          HTML
+
+          aws s3 cp "$ENV_HTML" "s3://${BUCKET_NAME}/reports/${ENV}/index.html" \
+            --content-type "text/html" --cache-control "no-cache"
+
+          ROOT_HTML=$(mktemp --suffix=.html)
+          cat > "$ROOT_HTML" <<ROOTHTML
+          <!DOCTYPE html><html lang="en"><head>
+          <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Test Reports</title>
+          <style>
+          *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+          body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F4F6F9;color:#1C2536;min-height:100vh}
+          .hdr{background:#1C2536;color:#fff;padding:32px 0;box-shadow:0 2px 12px rgba(0,0,0,.22)}
+          .hdr-inner,.main{max-width:760px;margin:0 auto;padding:0 24px}
+          .hdr h1{font-size:clamp(1.4rem,4vw,2rem);font-weight:700}
+          .hdr p{margin-top:8px;opacity:.65;font-size:.94rem}
+          .main{margin-top:48px;margin-bottom:64px}
+          .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px}
+          .env-card{border-radius:14px;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.08),0 8px 32px rgba(0,0,0,.08);transition:transform .15s,box-shadow .15s;display:block}
+          .env-card:hover{transform:translateY(-3px);box-shadow:0 4px 16px rgba(0,0,0,.12),0 16px 48px rgba(0,0,0,.1)}
+          .env-card-inner{padding:32px 28px}
+          .pill{display:inline-block;background:rgba(255,255,255,.25);border-radius:99px;padding:3px 12px;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff;margin-bottom:16px}
+          .env-card h2{font-size:1.4rem;font-weight:700;color:#fff}
+          .env-card p{margin-top:8px;color:rgba(255,255,255,.8);font-size:.88rem}
+          .stage{background:#1976D2}.uat{background:#F57C00}.production{background:#2E7D32}
+          </style></head><body>
+          <div class="hdr"><div class="hdr-inner">
+          <h1>Allure Test Reports</h1>
+          <p>Select an environment to browse automated test runs</p>
+          </div></div>
+          <div class="main"><div class="grid">
+          <a class="env-card stage" href="/reports/stage/index.html"><div class="env-card-inner"><div class="pill">Stage</div><h2>Stage</h2><p>Pre-production environment</p></div></a>
+          <a class="env-card uat" href="/reports/uat/index.html"><div class="env-card-inner"><div class="pill">UAT</div><h2>UAT</h2><p>User acceptance testing</p></div></a>
+          <a class="env-card production" href="/reports/production/index.html"><div class="env-card-inner"><div class="pill">Production</div><h2>Production</h2><p>Live environment</p></div></a>
+          </div></div></body></html>
+          ROOTHTML
+
+          aws s3 cp "$ROOT_HTML" "s3://${BUCKET_NAME}/index.html" \
+            --content-type "text/html" --cache-control "no-cache"
