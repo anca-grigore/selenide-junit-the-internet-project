@@ -1,5 +1,8 @@
 name: UAT Test Run
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       branch:
@@ -57,7 +60,7 @@ jobs:
       - name: Build Maven Command
         id: build-command
         run: |
-          MAVEN_CMD="mvn clean test -Puat,${EXECUTION_MODE},headless,chrome-desktop"
+          MAVEN_CMD="mvn clean test -Puat,headless,chrome-desktop"
                     
           # Run by tag or test class
           if [ "${{ github.event.inputs.runType }}" = "tag" ] && [ -n "${{ github.event.inputs.testValue }}" ]; then
