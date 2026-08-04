@@ -1,4 +1,4 @@
-name: UAT Automated Test Run
+name: UAT Test Run
 on:
   workflow_dispatch:
     inputs:
