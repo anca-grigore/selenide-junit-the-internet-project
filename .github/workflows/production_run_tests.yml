@@ -6,19 +6,16 @@ on:
         description: 'Branch to run tests on (leave empty to use workflow branch)'
         required: false
         default: ''
-
       runType:
         description: 'Run tests by tag or test class'
         required: true
         type: choice
         options: ['tag', 'testClass']
         default: 'tag'
-
       testValue:
         description: 'Tag name OR test class name/pattern'
         required: false
         default: ''
-
       appendMavenArgs:
         description: 'Optional Maven args'
         required: false
