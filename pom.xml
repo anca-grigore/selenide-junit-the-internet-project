@@ -16,6 +16,10 @@
         <junit.version>6.1.0-RC1</junit.version>
         <maven.surefire.version>3.5.3</maven.surefire.version>
         <rest-assured.version>6.0.0</rest-assured.version>
+        <allure.version>2.35.3</allure.version>
+        <maven.compiler.version>3.15.0</maven.compiler.version>
+        <aspectj.version>1.9.25.1</aspectj.version>
+        <env></env>
     </properties>
 
     <dependencyManagement>
@@ -54,6 +58,21 @@
             <artifactId>rest-assured</artifactId>
             <version>${rest-assured.version}</version>
         </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-jupiter</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-selenide</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-rest-assured</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -71,13 +90,92 @@
                 </configuration>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>11</source>
-                    <target>11</target>
-                </configuration>
-            </plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven.compiler.version}</version>
+        <configuration>
+          <release>22</release>
+          <source>22</source>
+          <target>22</target>
+        </configuration>
+      </plugin>
+      <!-- Surefire -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${maven.surefire.version}</version>
+        <configuration>
+          <useModulePath>false</useModulePath>
+          <!-- Allure + AspectJ -->
+          <argLine>
+            -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
+          </argLine>
+          <systemPropertyVariables>
+            <allure.results.directory>${project.basedir}/build/allure-results</allure.results.directory>
+            <!-- URLs, browser config, etc -->
+            <env>${env}</env>
+            <selenide.timeout>${selenide.timeout}</selenide.timeout>
+            <selenide.browser>${selenide.browser}</selenide.browser>
+            <selenide.browserSize>${selenide.browserSize}</selenide.browserSize>
+            <selenide.headless>${selenide.headless}</selenide.headless>
+            <selenide.startMaximized>${selenide.startMaximized}</selenide.startMaximized>
+          </systemPropertyVariables>
+        </configuration>
+        <dependencies>
+          <dependency>
+              <groupId>org.aspectj</groupId>
+              <artifactId>aspectjweaver</artifactId>
+            <version>${aspectj.version}</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+
+      <!-- Allure Report -->
+      <plugin>
+        <groupId>io.qameta.allure</groupId>
+        <artifactId>allure-maven</artifactId>
+        <version>2.18.0</version>
+        <configuration>
+          <reportVersion>2.44.0</reportVersion>
+          <resultsDirectory>${project.basedir}/build/allure-results</resultsDirectory>
+          <reportDirectory>${project.basedir}/build/allure-report</reportDirectory>
+        </configuration>
+      </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>uat</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <env>uat</env>
+            </properties>
+        </profile>
+        <profile>
+            <id>production</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <properties>
+                <env>production</env>
+            </properties>
+        </profile>
+        <profile>
+            <id>chrome-desktop</id>
+            <properties>
+                <selenide.browser>chrome</selenide.browser>
+                <selenide.browserSize>1920x1080</selenide.browserSize>
+                <selenide.startMaximized>true</selenide.startMaximized>
+                <selenide.timeout>15000</selenide.timeout>
+            </properties>
+        </profile>
+        <profile>
+            <id>headless</id>
+            <properties>
+                <selenide.headless>true</selenide.headless>
+            </properties>
+        </profile>
+    </profiles>
 </project>
