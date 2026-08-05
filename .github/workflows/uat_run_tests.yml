@@ -97,6 +97,19 @@ jobs:
           [ -d build/allure-report ] && mv build/allure-report "$TIMESTAMP/"
           echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 
+      - name: "[TO BE REMOVED] Migrate existing reports to stage folder"
+        run: |
+          BUCKET_NAME=${{ vars.AWS_BUCKET_NAME }}
+          echo "Migrating existing reports to reports/stage/..."
+          aws s3 ls s3://$BUCKET_NAME/reports/ --delimiter / \
+            | awk '/PRE/ {print $2}' \
+            | grep -v -E '^(stage|uat|production)/$' \
+            | while read -r folder; do
+                echo "Moving $folder -> reports/stage/$folder"
+                aws s3 mv "s3://$BUCKET_NAME/reports/$folder" \
+                          "s3://$BUCKET_NAME/reports/stage/$folder" --recursive
+              done
+          echo "Migration complete."
       - name: Upload Allure Artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.1
